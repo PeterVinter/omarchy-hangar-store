@@ -57,11 +57,127 @@ function parseAur(text, repoIndex) {
         v: String(r.Version || "").slice(0, 40),
         s: 0,
         d: String(r.Description || "").slice(0, 200),
-        votes: Number(r.NumVotes) || 0
+        votes: Number(r.NumVotes) || 0,
+        updated: Number(r.LastModified) || 0,
+        ood: Number(r.OutOfDate) || 0,
+        orphan: !r.Maintainer
       })
     }
   } catch (e) {}
   return out
+}
+
+
+// ---- AUR trust signals ------------------------------------------------------
+
+var STALE_SECONDS = 2 * 365 * 86400
+
+// Short warnings for an AUR row or detail record: "orphaned", "out of date", "stale".
+function warnings(it, nowSec) {
+  var out = []
+  if (!it || it.r !== "aur") return out
+  var now = nowSec || Math.floor(Date.now() / 1000)
+  if (it.ood) out.push("out of date")
+  if (it.orphan) out.push("orphaned")
+  if (it.updated && now - it.updated > STALE_SECONDS) out.push("stale")
+  return out
+}
+
+// Compact age: 5d, 3mo, 2y.
+function ago(epoch, nowSec) {
+  if (!epoch) return ""
+  var now = nowSec || Math.floor(Date.now() / 1000)
+  var d = Math.max(0, Math.floor((now - epoch) / 86400))
+  if (d < 1) return "today"
+  if (d < 60) return d + "d"
+  if (d < 730) return Math.round(d / 30) + "mo"
+  return Math.floor(d / 365) + "y"
+}
+
+function formatDate(epoch) {
+  if (!epoch) return ""
+  var d = new Date(epoch * 1000)
+  var m = d.getMonth() + 1
+  var day = d.getDate()
+  return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day
+}
+
+// ---- Details ----------------------------------------------------------------
+
+function clip(text, max) {
+  text = String(text || "")
+  return text.length > max ? text.slice(0, max - 1) + "…" : text
+}
+
+function safeUrl(u) {
+  return typeof u === "string" && /^https?:\/\/[^\s'"`$\\]{1,300}$/.test(u) ? u : ""
+}
+
+// Parses `pacman -Si` / `pacman -Qi` output into a normalized detail record.
+function parseInfo(text) {
+  var map = {}
+  var key = null
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var m = /^([A-Za-z][A-Za-z ]*?)\s*:\s?(.*)$/.exec(lines[i])
+    if (m && lines[i].charAt(0) !== " ") { key = m[1]; map[key] = m[2] }
+    else if (key && /^\s+\S/.test(lines[i])) map[key] += " " + lines[i].replace(/^\s+/, "")
+  }
+  function g(k) { var v = map[k]; return v && v !== "None" ? v : "" }
+  if (!map.Name) return null
+  return {
+    n: g("Name"), v: g("Version"), r: g("Repository") || "local", d: g("Description"),
+    url: safeUrl(g("URL")), license: g("Licenses"),
+    depends: g("Depends On"), optdepends: g("Optional Deps"),
+    dsize: g("Download Size"), isize: g("Installed Size"),
+    packager: g("Packager"), built: g("Build Date"), arch: g("Architecture")
+  }
+}
+
+// Parses an AUR RPC `info` response into the same record shape.
+function parseAurInfo(text) {
+  try {
+    var data = JSON.parse(text)
+    var r = data && data.results && data.results[0]
+    if (!r || !validName(r.Name)) return null
+    function list(a) { return Array.isArray(a) ? a.map(function(x) { return String(x).replace(/[<>=].*$/, "") }).join("  ") : "" }
+    return {
+      n: r.Name, v: String(r.Version || "").slice(0, 40), r: "aur", d: clip(r.Description, 300),
+      url: safeUrl(r.URL), license: Array.isArray(r.License) ? r.License.join(", ") : "",
+      depends: clip(list(r.Depends), 300), optdepends: clip(list(r.OptDepends), 300),
+      maintainer: r.Maintainer ? String(r.Maintainer).slice(0, 60) : "",
+      votes: Number(r.NumVotes) || 0, popularity: Number(r.Popularity) || 0,
+      updated: Number(r.LastModified) || 0, first: Number(r.FirstSubmitted) || 0,
+      ood: Number(r.OutOfDate) || 0, orphan: !r.Maintainer
+    }
+  } catch (e) { return null }
+}
+
+// ---- Updates ----------------------------------------------------------------
+
+// Parses `checkupdates; echo ---; yay -Qua` into { name: {from, to, aur} }.
+function parseUpdates(text) {
+  var out = {}
+  var parts = String(text || "").split("---\n")
+  for (var p = 0; p < parts.length && p < 2; p++) {
+    var lines = parts[p].split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var m = /^(\S+)\s+(\S+)\s+->\s+(\S+)/.exec(lines[i])
+      if (m && validName(m[1])) out[m[1]] = { from: m[2], to: m[3], aur: p === 1 }
+    }
+  }
+  return out
+}
+
+// ---- Sorting ----------------------------------------------------------------
+
+var sortModes = ["Default", "Name", "Size", "Votes"]
+
+function sortRows(rows, mode) {
+  if (mode === "Name") rows.sort(function(a, b) { return String(a.label || a.n).toLowerCase() < String(b.label || b.n).toLowerCase() ? -1 : 1 })
+  else if (mode === "Size") rows.sort(function(a, b) { return (b.s || 0) - (a.s || 0) })
+  else if (mode === "Votes") rows.sort(function(a, b) { return (b.votes || 0) - (a.votes || 0) })
+  return rows
 }
 
 function score(item, q) {
@@ -76,7 +192,7 @@ function score(item, q) {
 
 // Builds the visible rows.
 // opts: { catalog, categories, category, filter, repo, repoIndex, installed,
-//         explicit, aurEnabled, aurResults, limit }
+//         explicit, updates, aurEnabled, aurResults, sort, limit }
 function build(opts) {
   var out = []
   var seen = {}
@@ -116,10 +232,24 @@ function build(opts) {
     if (opts.aurEnabled) {
       for (var m = 0; m < opts.aurResults.length && out.length < opts.limit + 40; m++) {
         var a = opts.aurResults[m]
-        push({ n: a.n, label: a.n, p: a.p, c: "", d: a.d, r: "aur", v: a.v, s: 0, votes: a.votes })
+        push({ n: a.n, label: a.n, p: a.p, c: "", d: a.d, r: "aur", v: a.v, s: 0, votes: a.votes,
+               updated: a.updated, ood: a.ood, orphan: a.orphan })
       }
     }
-    return out
+    return sortRows(out, opts.sort)
+  }
+
+  if (opts.category === "Updates") {
+    var upd = opts.updates || {}
+    var unames = Object.keys(upd).sort()
+    for (var u = 0; u < unames.length; u++) {
+      var ui = opts.repoIndex[unames[u]]
+      var ur = ui !== undefined ? opts.repo[ui] : null
+      push({ n: unames[u], label: unames[u], p: unames[u], c: "", d: ur ? ur.d : (upd[unames[u]].aur ? "AUR package" : ""),
+             r: upd[unames[u]].aur ? "aur" : (ur ? ur.r : "repo"), v: upd[unames[u]].to, s: ur ? ur.s : 0,
+             upd: upd[unames[u]].from + " → " + upd[unames[u]].to })
+    }
+    return sortRows(out, opts.sort)
   }
 
   if (opts.category === "Installed") {
@@ -130,7 +260,7 @@ function build(opts) {
       push({ n: names[x], label: names[x], p: names[x], c: "", d: r ? r.d : "Installed from outside the repositories",
              r: r ? r.r : "local", v: r ? r.v : "", s: r ? r.s : 0 })
     }
-    return out
+    return sortRows(out, opts.sort)
   }
 
   for (var y = 0; y < opts.catalog.length; y++) {
@@ -139,5 +269,5 @@ function build(opts) {
     var it = fromCatalog(c)
     if (it) push(it)
   }
-  return out
+  return sortRows(out, opts.sort)
 }

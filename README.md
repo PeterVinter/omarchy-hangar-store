@@ -46,6 +46,10 @@ other files or settings, and apps you installed with it stay installed.
 - Optional AUR search (toggle with `Ctrl+A`).
 - Install queue: mark several apps, then install them in one go.
 - Shows installed state, repository, version and size for each package.
+- Updates tab with a count of pending repository and AUR updates.
+- Detail view with license, sizes, dependencies and homepage.
+- AUR trust signals: warnings for out-of-date, orphaned and stale packages.
+- Sort by name, size or votes.
 - Follows the current Omarchy theme, font and corner radius.
 - Curated entries that do not exist for your architecture (for example x86-only apps on ARM) are hidden automatically.
 
@@ -59,6 +63,10 @@ other files or settings, and apps you installed with it stay installed.
 | `Delete` | Remove the selected installed app |
 | `Tab` / `Shift+Tab` | Next / previous category |
 | `Ctrl+A` | Toggle AUR search |
+| `Ctrl+I` / right-click | Show package details |
+| `Ctrl+S` | Cycle sort: Default, Name, Size, Votes |
+| `Ctrl+R` | Recheck for updates |
+| `Ctrl+O` | In the detail view, open the homepage |
 | Arrow keys, `PgUp`, `PgDn` | Move the selection |
 | `Esc` | Clear the filter, then close |
 
@@ -71,10 +79,13 @@ password there:
 - `omarchy-pkg-add` for repository packages
 - `omarchy-pkg-aur-add` for AUR packages
 - `omarchy-pkg-drop` for removal
+- `omarchy-update` for the Updates tab
 
 Package names are validated before they reach a command line. The plugin reads your
-package databases with `expac` and `pacman -Q`. AUR search is off by default; when
-enabled it queries the AUR RPC over HTTPS.
+package databases with `expac` and `pacman -Q`, and checks updates with `checkupdates`
+(no root needed) and `yay -Qua`. Details come from `pacman -Si`. AUR search is off by
+default; when enabled it queries the AUR RPC over HTTPS, and opening details for an AUR
+package queries the same API.
 
 Plugins run unsandboxed, so read the code before you install it. It is one QML file
 and two small JavaScript files.
@@ -82,13 +93,18 @@ and two small JavaScript files.
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell`
-- `expac`, `pacman`, `curl`
+- `expac`, `pacman`, `pacman-contrib` (for `checkupdates`), `curl`
 - `yay` (or whatever `omarchy-pkg-aur-add` uses) for AUR installs
 
 ## Customize the catalog
 
 Edit `Catalog.js`. Each entry is `{ n: name, p: package, c: category, d: description }`,
 with `a: true` for AUR packages.
+
+## Roadmap and changelog
+
+See [ROADMAP.md](ROADMAP.md) for what may come next and [CHANGELOG.md](CHANGELOG.md)
+for what changed in each release.
 
 ## License
 
