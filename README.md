@@ -16,6 +16,17 @@ package in your repositories, and install or remove with one key.
 
 </div>
 
+## Screenshots
+
+| | |
+|---|---|
+| **Updates tab.** Pending repository and AUR updates, one key to update all. | **Details** (`Ctrl+I`) for a package: sizes, dependencies, homepage. |
+| ![Updates tab](docs/screenshots/03-updates-tab.png) | ![Details view](docs/screenshots/04-details-update.png) |
+| **AUR trust signals.** Warnings for stale, orphaned and out-of-date packages, with votes and age. | **Details for an AUR package** with a plain-language warning. |
+| ![AUR results sorted by votes with warnings](docs/screenshots/06-aur-sorted-by-votes.png) | ![AUR package details with warning](docs/screenshots/07-details-aur-trust.png) |
+| **Sort** by name, size or votes (`Ctrl+S`). | **Search** with the AUR switched on (`Ctrl+A`). |
+| ![Sorted by size](docs/screenshots/02-sort-by-size.png) | ![Search with AUR on](docs/screenshots/05-aur-trust-warnings.png) |
+
 ## Install
 
 ```bash

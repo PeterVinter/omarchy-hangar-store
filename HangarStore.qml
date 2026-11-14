@@ -680,7 +680,7 @@ Item {
             clip: true
             model: root.items
             cellWidth: Math.floor(width / root.columns)
-            cellHeight: Style.space(118)
+            cellHeight: Style.space(128)
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Item {
@@ -781,7 +781,8 @@ Item {
                   anchors.left: nameText.left
                   anchors.right: parent.right
                   anchors.rightMargin: Style.spacing.lg + 2
-                  anchors.top: nameText.bottom
+                  anchors.top: actionPill.bottom
+                  anchors.topMargin: Style.spacing.sm
                   textFormat: Text.PlainText
                   text: {
                     var bits = []

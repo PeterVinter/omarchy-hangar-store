@@ -35,4 +35,5 @@ Shipped items are listed in [CHANGELOG.md](CHANGELOG.md).
 
 - Bump `version` in `manifest.json` for every release and tag it (`v1.1.0`).
 - Add an entry to `CHANGELOG.md`.
-- Refresh the screenshots in `docs/screenshots/`.
+- Refresh the screenshots in `docs/screenshots/` and `preview.png`. Restart the shell
+  (`omarchy-restart-shell`) before capturing, because the shell caches plugin QML.
