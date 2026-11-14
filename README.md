@@ -19,7 +19,7 @@ package in your repositories, and install or remove with one key.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/PeterWinther/omarchy-hangar-store.git --enable --yes
+omarchy plugin add https://github.com/PeterVinter/omarchy-hangar-store.git --enable --yes
 ```
 
 Open it with:
