@@ -30,6 +30,15 @@ omarchy-shell shell toggle peter.hangar-store
 
 Bind that command to a key in `~/.config/hypr/bindings.lua` if you want a shortcut.
 
+## Remove
+
+```bash
+omarchy plugin remove peter.hangar-store
+```
+
+That deletes the plugin folder in `~/.config/omarchy/plugins/`. Hangar Store keeps no
+other files or settings, and apps you installed with it stay installed.
+
 ## Features
 
 - Curated apps in nine categories: Browsers, Development, Media, Graphics, Office, Communication, Utilities, Games and AI.
