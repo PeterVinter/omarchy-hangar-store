@@ -39,7 +39,23 @@ Item {
 
   property var items: []
 
-  readonly property var categoryNames: ["Featured"].concat(Catalog.categories).concat(["Installed"])
+  property string sortMode: "Default"
+
+  property var updates: ({})
+  property int updatesCount: 0
+  property bool updatesBusy: false
+  property double updatesChecked: 0
+
+  property bool showDetail: false
+  property var detailItem: null
+  property var detailInfo: null
+  property bool detailBusy: false
+  property var detailPending: null
+
+  readonly property bool updateMode: root.category === "Updates" && root.filterText === ""
+                                     && root.updatesCount > 0 && root.basketCount === 0
+
+  readonly property var categoryNames: ["Featured"].concat(Catalog.categories).concat(["Updates", "Installed"])
 
   // Theme tokens (shared with the Omarchy menu).
   property color background: Commons.Color.menu.background
@@ -62,6 +78,7 @@ Item {
   function open(payloadJson) {
     root.opened = true
     root.showAbout = false
+    root.showDetail = false
     root.filterText = ""
     root.category = "Featured"
     root.selectedIndex = 0
@@ -70,6 +87,7 @@ Item {
     root.basketCount = 0
     root.aurResults = []
     root.refreshInstalled()
+    root.refreshUpdates(false)
     if (!root.repoLoaded && !repoProc.running) repoProc.running = true
     root.rebuild()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -101,6 +119,8 @@ Item {
       repoIndex: root.repoIndex,
       installed: root.installed,
       explicit: root.explicit,
+      updates: root.updates,
+      sort: root.sortMode,
       aurEnabled: root.aurEnabled,
       aurResults: root.aurResults,
       limit: 150
@@ -134,6 +154,101 @@ Item {
     root.aurResults = []
     root.rebuild()
     root.scheduleAur()
+  }
+
+  function cycleSort() {
+    var modes = Model.sortModes
+    root.sortMode = modes[(modes.indexOf(root.sortMode) + 1) % modes.length]
+    root.selectedIndex = 0
+    root.rebuild()
+  }
+
+  function categoryLabel(name) {
+    if (name !== "Updates") return name
+    if (root.updatesCount > 0) return "Updates " + root.updatesCount
+    return root.updatesBusy ? "Updates …" : "Updates"
+  }
+
+  // -------------------------------------------------------------- updates
+
+  function refreshUpdates(force) {
+    if (updProc.running) return
+    if (!force && root.updatesChecked > 0 && Date.now() - root.updatesChecked < 300000) return
+    root.updatesBusy = true
+    updProc.running = true
+  }
+
+  // Arch does not support partial upgrades, so updating is always the full
+  // Omarchy update, never a single package.
+  function runUpdate() {
+    root.updatesChecked = 0
+    root.run("omarchy-update")
+  }
+
+  // --------------------------------------------------------------- details
+
+  function openDetails(item) {
+    if (!item || !Model.validName(item.p)) return
+    root.detailItem = item
+    root.detailInfo = null
+    root.showDetail = true
+    root.loadDetails(item)
+  }
+
+  function closeDetails() {
+    root.showDetail = false
+    root.detailPending = null
+  }
+
+  function loadDetails(item) {
+    if (detailProc.running) { root.detailPending = item; return }
+    root.detailBusy = true
+    root.detailPending = null
+    if (item.r === "aur")
+      detailProc.command = ["curl", "-sf", "--proto", "=https", "--max-time", "8", "--max-filesize", "1048576",
+        "https://aur.archlinux.org/rpc/v5/info?arg[]=" + encodeURIComponent(item.p)]
+    else
+      detailProc.command = ["bash", "-c", "LC_ALL=C pacman -Si -- \"$1\" 2>/dev/null || LC_ALL=C pacman -Qi -- \"$1\"", "hangar", item.p]
+    detailProc.running = true
+  }
+
+  function openHomepage() {
+    var url = root.detailInfo && root.detailInfo.url
+    if (url) Quickshell.execDetached(["xdg-open", url])
+  }
+
+  function detailAction() {
+    var item = root.detailItem
+    if (!item) return
+    if (item.upd) root.runUpdate()
+    else root.installOne(item)
+  }
+
+  // Label/value rows for the detail view, merged from the item and fetched info.
+  function detailRows() {
+    var it = root.detailItem
+    var info = root.detailInfo
+    var rows = []
+    if (!it) return rows
+    function add(k, v) { if (v !== undefined && v !== null && String(v) !== "") rows.push({ k: k, v: String(v) }) }
+    var src = info || it
+    add("Source", it.r === "aur" ? "AUR" : (info && info.r) || it.r)
+    add("Version", (info && info.v) || it.v)
+    if (it.upd) add("Update", it.upd)
+    add("License", info && info.license)
+    if (info && info.dsize) add("Download", info.dsize)
+    if (info && info.isize) add("Installed size", info.isize)
+    else if (it.s) add("Installed size", Model.formatSize(it.s))
+    if (info && info.maintainer !== undefined) add("Maintainer", info.maintainer || "none (orphaned)")
+    if (info && info.votes !== undefined) add("Votes", "★ " + info.votes + "   popularity " + info.popularity.toFixed(2))
+    if (info && info.updated) add("Last updated", Model.formatDate(info.updated) + "  (" + Model.ago(info.updated) + " ago)")
+    if (info && info.first) add("First submitted", Model.formatDate(info.first))
+    if (info && info.built) add("Built", info.built)
+    if (info && info.arch) add("Architecture", info.arch)
+    add("Homepage", info && info.url)
+    add("Depends", info && Model.clip(info.depends, 260))
+    add("Optional", info && Model.clip(info.optdepends, 260))
+    return rows
   }
 
   // ------------------------------------------------------------- selection
@@ -186,7 +301,9 @@ Item {
   }
 
   function installBasketOrCurrent() {
-    if (root.basketCount > 0) {
+    if (root.updateMode) {
+      root.runUpdate()
+    } else if (root.basketCount > 0) {
       var picked = []
       for (var p in root.basket) picked.push({ p: p, r: root.basket[p] })
       root.installItems(picked)
@@ -232,6 +349,37 @@ Item {
       }
     }
     onExited: function(code) { if (code !== 0) root.aurBusy = false }
+  }
+
+  Process {
+    id: updProc
+    command: ["bash", "-c", "timeout 90 checkupdates 2>/dev/null; echo ---; if command -v yay >/dev/null; then timeout 45 yay -Qua 2>/dev/null; fi"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.updates = Model.parseUpdates(text)
+        root.updatesCount = Object.keys(root.updates).length
+        root.updatesChecked = Date.now()
+        root.updatesBusy = false
+        root.rebuild()
+      }
+    }
+    onExited: root.updatesBusy = false
+  }
+
+  Process {
+    id: detailProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var item = root.detailItem
+        var info = item && item.r === "aur" ? Model.parseAurInfo(text) : Model.parseInfo(text)
+        if (info && item && info.n === item.p) root.detailInfo = info
+        root.detailBusy = false
+      }
+    }
+    onExited: {
+      root.detailBusy = false
+      if (root.detailPending) root.loadDetails(root.detailPending)
+    }
   }
 
   Process {
@@ -321,12 +469,23 @@ Item {
           var key = event.key
           if (key === Qt.Key_Escape) {
             if (root.showAbout) root.showAbout = false
+            else if (root.showDetail) root.closeDetails()
             else if (root.filterText) root.setFilter("")
             else root.dismiss()
           } else if (root.showAbout) {
             if (key === Qt.Key_Return || key === Qt.Key_Enter) root.showAbout = false
+          } else if (root.showDetail) {
+            if (key === Qt.Key_Return || key === Qt.Key_Enter) root.detailAction()
+            else if (key === Qt.Key_Delete) root.removeItem(root.detailItem)
+            else if (ctrl && key === Qt.Key_O) root.openHomepage()
           } else if (ctrl && key === Qt.Key_A) {
             root.toggleAur()
+          } else if (ctrl && key === Qt.Key_S) {
+            root.cycleSort()
+          } else if (ctrl && key === Qt.Key_R) {
+            root.refreshUpdates(true)
+          } else if (ctrl && key === Qt.Key_I) {
+            root.openDetails(root.currentItem())
           } else if (key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
             root.cycleCategory(-1)
           } else if (key === Qt.Key_Tab) {
@@ -394,7 +553,7 @@ Item {
           Text {
             anchors.left: searchGlyph.right
             anchors.leftMargin: Style.spacing.md
-            anchors.right: aurBadge.left
+            anchors.right: sortBadge.left
             anchors.rightMargin: Style.spacing.md
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
@@ -404,6 +563,36 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+          }
+
+          Rectangle {
+            id: sortBadge
+            anchors.right: aurBadge.left
+            anchors.rightMargin: Style.spacing.md
+            anchors.verticalCenter: parent.verticalCenter
+            width: sortLabel.implicitWidth + Style.spacing.lg * 2
+            height: Style.font.body + Style.spacing.md * 2
+            radius: height / 2
+            color: root.sortMode !== "Default" ? Util.alpha(root.accent, 0.2) : "transparent"
+            border.width: 1
+            border.color: Util.alpha(root.sortMode !== "Default" ? root.accent : root.foreground, root.sortMode !== "Default" ? 0.9 : 0.3)
+
+            Text {
+              id: sortLabel
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: "Sort: " + root.sortMode
+              color: root.sortMode !== "Default" ? root.accent : root.foreground
+              opacity: root.sortMode !== "Default" ? 1 : 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.cycleSort()
+            }
           }
 
           Rectangle {
@@ -461,11 +650,11 @@ Item {
                 id: chipText
                 anchors.centerIn: parent
                 textFormat: Text.PlainText
-                text: parent.modelData
-                color: parent.active ? root.accent : root.foreground
+                text: root.categoryLabel(parent.modelData)
+                color: parent.active ? root.accent : (parent.modelData === "Updates" && root.updatesCount > 0 ? root.accent : root.foreground)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
-                font.bold: parent.active
+                font.bold: parent.active || (parent.modelData === "Updates" && root.updatesCount > 0)
               }
 
               MouseArea {
@@ -491,7 +680,7 @@ Item {
             clip: true
             model: root.items
             cellWidth: Math.floor(width / root.columns)
-            cellHeight: Style.space(118)
+            cellHeight: Style.space(128)
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Item {
@@ -501,6 +690,8 @@ Item {
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
               readonly property bool marked: !!root.basket[modelData.p]
+              readonly property bool showInstalled: !!modelData.installed && !modelData.upd
+              readonly property var warns: Model.warnings(modelData)
 
               width: grid.cellWidth
               height: grid.cellHeight
@@ -536,6 +727,28 @@ Item {
                     visible: status === Image.Ready
                   }
 
+                  Rectangle {
+                    visible: cell.warns.length > 0
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: -Style.space(4)
+                    width: Style.space(18)
+                    height: width
+                    radius: width / 2
+                    color: Commons.Color.urgent
+                    z: 2
+
+                    Text {
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: "!"
+                      color: root.background
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      font.bold: true
+                    }
+                  }
+
                   Text {
                     anchors.centerIn: parent
                     visible: iconImage.status !== Image.Ready
@@ -566,19 +779,28 @@ Item {
 
                 Text {
                   anchors.left: nameText.left
-                  anchors.right: nameText.right
-                  anchors.top: nameText.bottom
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.lg + 2
+                  anchors.top: actionPill.bottom
+                  anchors.topMargin: Style.spacing.sm
                   textFormat: Text.PlainText
                   text: {
-                    var bits = [cell.modelData.r]
+                    var bits = []
+                    if (cell.warns.length) bits.push("⚠ " + cell.warns.join(", "))
+                    if (cell.modelData.upd) {
+                      bits.push(cell.modelData.upd.replace(/(^|\s)\d+:/g, "$1"))
+                      return bits.join("  ·  ")
+                    }
+                    bits.push(cell.modelData.r)
                     if (cell.modelData.v) bits.push(cell.modelData.v.replace(/^\d+:/, ""))
                     var size = Model.formatSize(cell.modelData.s)
                     if (size) bits.push(size)
                     if (cell.modelData.votes) bits.push("★ " + cell.modelData.votes)
+                    if (!cell.warns.length && cell.modelData.updated) bits.push(Model.ago(cell.modelData.updated))
                     return bits.join("  ·  ")
                   }
-                  color: root.foreground
-                  opacity: 0.5
+                  color: cell.warns.length ? Commons.Color.urgent : root.foreground
+                  opacity: cell.warns.length ? 0.9 : 0.5
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
@@ -603,12 +825,16 @@ Item {
                 MouseArea {
                   anchors.fill: parent
                   hoverEnabled: true
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
                   cursorShape: Qt.PointingHandCursor
                   onContainsMouseChanged: if (containsMouse) {
                     root.cursorActive = true
                     root.selectedIndex = cell.index
                   }
-                  onClicked: root.toggleMark(cell.modelData)
+                  onClicked: function(mouse) {
+                    if (mouse.button === Qt.RightButton) root.openDetails(cell.modelData)
+                    else root.toggleMark(cell.modelData)
+                  }
                 }
 
                 // Action pill: Install, Installed (turns into Remove on hover)
@@ -621,12 +847,12 @@ Item {
                   height: Style.font.bodySmall + Style.spacing.md * 2
                   radius: height / 2
                   color: {
-                    if (cell.modelData.installed)
+                    if (cell.showInstalled)
                       return pillMouse.containsMouse ? Util.alpha(Commons.Color.urgent, 0.25) : "transparent"
                     return pillMouse.containsMouse ? root.accent : Util.alpha(root.accent, cell.marked ? 0.45 : 0.18)
                   }
                   border.width: 1
-                  border.color: cell.modelData.installed
+                  border.color: cell.showInstalled
                     ? Util.alpha(pillMouse.containsMouse ? Commons.Color.urgent : root.foreground, 0.5)
                     : Util.alpha(root.accent, 0.8)
                   Behavior on color { ColorAnimation { duration: Style.duration(120) } }
@@ -635,13 +861,13 @@ Item {
                     id: pillText
                     anchors.centerIn: parent
                     textFormat: Text.PlainText
-                    text: cell.modelData.installed
+                    text: cell.showInstalled
                       ? (pillMouse.containsMouse ? "Remove" : "Installed")
-                      : (cell.marked ? "Queued" : "Install")
-                    color: cell.modelData.installed
+                      : (cell.modelData.upd ? "Update" : (cell.marked ? "Queued" : "Install"))
+                    color: cell.showInstalled
                       ? (pillMouse.containsMouse ? Commons.Color.urgent : root.foreground)
                       : (pillMouse.containsMouse ? root.background : root.accent)
-                    opacity: cell.modelData.installed && !pillMouse.containsMouse ? 0.65 : 1
+                    opacity: cell.showInstalled && !pillMouse.containsMouse ? 0.65 : 1
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.bold: true
@@ -653,7 +879,8 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      if (cell.modelData.installed) root.removeItem(cell.modelData)
+                      if (cell.modelData.upd) root.runUpdate()
+                      else if (cell.modelData.installed) root.removeItem(cell.modelData)
                       else root.installOne(cell.modelData)
                     }
                   }
@@ -671,7 +898,10 @@ Item {
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
               textFormat: Text.PlainText
-              text: root.repoLoaded ? "No matches" : "Reading package databases…"
+              text: !root.repoLoaded ? "Reading package databases…"
+                  : (root.category === "Updates" && root.filterText === ""
+                     ? (root.updatesBusy ? "Checking for updates…" : "Everything is up to date")
+                     : "No matches")
               color: root.foreground
               opacity: 0.75
               font.family: root.fontFamily
@@ -702,7 +932,9 @@ Item {
             anchors.right: aboutButton.left
             anchors.rightMargin: Style.spacing.lg
             textFormat: Text.PlainText
-            text: "↵ install   Ins queue   Del remove   ⇥ category   ^A AUR   esc close"
+            text: root.updateMode
+              ? "↵ update all   ^I details   ^R recheck   ^S sort   ⇥ category   esc close"
+              : "↵ install   Ins queue   Del remove   ^I details   ^S sort   ^A AUR   ⇥ category   esc close"
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
@@ -737,7 +969,7 @@ Item {
             id: queueButton
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.basketCount > 0
+            visible: root.basketCount > 0 || root.updateMode
             width: queueText.implicitWidth + Style.spacing.lg * 3
             height: parent.height
             radius: height / 2
@@ -748,7 +980,8 @@ Item {
               id: queueText
               anchors.centerIn: parent
               textFormat: Text.PlainText
-              text: "Install " + root.basketCount + (root.basketCount === 1 ? " app" : " apps")
+              text: root.updateMode ? "Update all " + root.updatesCount
+                                    : "Install " + root.basketCount + (root.basketCount === 1 ? " app" : " apps")
               color: queueMouse.containsMouse ? root.background : root.accent
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -762,6 +995,182 @@ Item {
               cursorShape: Qt.PointingHandCursor
               onClicked: root.installBasketOrCurrent()
             }
+          }
+        }
+      }
+
+      // Detail view
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: -root.pad
+        radius: root.cornerRadius
+        color: root.background
+        visible: opacity > 0
+        opacity: root.showDetail ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: Style.duration(150); easing.type: Easing.OutCubic } }
+
+        MouseArea { anchors.fill: parent; onClicked: root.closeDetails() }
+
+        Column {
+          id: detailColumn
+          anchors.centerIn: parent
+          spacing: Style.spacing.lg
+          width: Math.min(parent.width - root.pad * 4, Style.space(680))
+
+          Row {
+            spacing: Style.spacing.lg
+            width: parent.width
+
+            Rectangle {
+              id: detailIcon
+              width: Style.space(56)
+              height: width
+              radius: Math.max(root.cornerRadius, Style.space(10))
+              color: Util.alpha(root.accent, 0.16)
+              border.width: 1
+              border.color: Util.alpha(root.accent, 0.6)
+
+              Text {
+                anchors.centerIn: parent
+                textFormat: Text.PlainText
+                text: root.detailItem ? String(root.detailItem.label || root.detailItem.n).charAt(0).toUpperCase() : ""
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.displayLarge
+                font.bold: true
+              }
+            }
+
+            Column {
+              width: parent.width - detailIcon.width - Style.spacing.lg
+              anchors.verticalCenter: detailIcon.verticalCenter
+              spacing: Style.spacing.sm
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.detailItem ? (root.detailItem.label || root.detailItem.n) : ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.displayLarge
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.detailItem ? root.detailItem.p + (root.detailItem.installed ? "   ·   installed" : "") : ""
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideRight
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: root.detailItem ? ((root.detailInfo && root.detailInfo.d) || root.detailItem.d) : ""
+            color: root.foreground
+            opacity: 0.85
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          // AUR trust signals
+          Rectangle {
+            readonly property var warns: Model.warnings(root.detailInfo || root.detailItem)
+            visible: warns.length > 0
+            width: parent.width
+            height: warnText.implicitHeight + Style.spacing.lg * 2
+            radius: root.cornerRadius
+            color: Util.alpha(Commons.Color.urgent, 0.12)
+            border.width: 1
+            border.color: Util.alpha(Commons.Color.urgent, 0.6)
+
+            Text {
+              id: warnText
+              anchors.fill: parent
+              anchors.margins: Style.spacing.lg
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+              text: {
+                var w = parent.warns
+                var bits = []
+                if (w.indexOf("out of date") >= 0) bits.push("flagged out of date by users")
+                if (w.indexOf("orphaned") >= 0) bits.push("has no maintainer")
+                if (w.indexOf("stale") >= 0) bits.push("not updated for over two years")
+                return "⚠ Be careful: this AUR package is " + bits.join(", ") + ". Read its PKGBUILD before installing."
+              }
+              color: Commons.Color.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            Text {
+              visible: root.detailBusy && !root.detailInfo
+              textFormat: Text.PlainText
+              text: "Loading details…"
+              color: root.foreground
+              opacity: 0.6
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            Repeater {
+              model: root.showDetail ? root.detailRows() : []
+
+              delegate: Row {
+                required property var modelData
+                width: detailColumn.width
+                spacing: Style.spacing.lg
+
+                Text {
+                  width: Style.space(130)
+                  textFormat: Text.PlainText
+                  text: parent.modelData.k
+                  color: root.foreground
+                  opacity: 0.5
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Text {
+                  width: parent.width - Style.space(130) - Style.spacing.lg
+                  wrapMode: Text.WordWrap
+                  maximumLineCount: 3
+                  elide: Text.ElideRight
+                  textFormat: Text.PlainText
+                  text: parent.modelData.v
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: (root.detailItem && root.detailItem.upd ? "↵ update all   " : (root.detailItem && !root.detailItem.installed ? "↵ install   " : ""))
+                  + (root.detailItem && root.detailItem.installed ? "Del remove   " : "")
+                  + (root.detailInfo && root.detailInfo.url ? "^O homepage   " : "") + "esc back"
+            color: root.foreground
+            opacity: 0.5
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
         }
       }
@@ -818,7 +1227,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
-            text: "Version " + ((root.manifest && root.manifest.version) || "1.0.0")
+            text: "Version " + ((root.manifest && root.manifest.version) || "1.1.0")
             color: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
