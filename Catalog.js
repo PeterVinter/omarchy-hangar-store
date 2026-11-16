@@ -75,3 +75,14 @@ var apps = [
   { n: "Ollama", p: "ollama", c: "AI", d: "Run large language models locally" },
   { n: "Claude Code", p: "claude-code", a: true, c: "AI", d: "Anthropic's coding agent for the terminal" }
 ]
+
+// Starter packs for the Bundles tab. `apps` lists package names from the catalog
+// above. Packages the repositories of this machine do not have are skipped.
+var bundles = [
+  { id: "dev", n: "Dev setup", apps: ["neovim", "helix", "lazygit", "github-cli", "docker", "meld", "btop"] },
+  { id: "creative", n: "Creative", apps: ["gimp", "inkscape", "krita", "blender", "darktable", "kdenlive", "audacity"] },
+  { id: "media", n: "Media center", apps: ["vlc", "mpv", "strawberry", "easyeffects", "obs-studio", "handbrake"] },
+  { id: "office", n: "Office", apps: ["libreoffice-fresh", "obsidian", "thunderbird", "okular", "xournalpp", "calibre"] },
+  { id: "privacy", n: "Privacy", apps: ["keepassxc", "signal-desktop", "syncthing", "bitwarden"] },
+  { id: "gaming", n: "Gaming", apps: ["steam", "lutris", "retroarch", "prismlauncher", "supertuxkart", "openttd"] }
+]

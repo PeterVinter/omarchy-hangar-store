@@ -37,7 +37,13 @@ Item {
   property bool aurBusy: false
   property string aurQuery: ""
 
+  readonly property string here: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/+$/, "")
+
   property var items: []
+
+  // Desktop entries of installed packages: { pkg: { id, icon, launch } }.
+  property var desktops: ({})
+  property int desktopsFor: -1
 
   property string sortMode: "Default"
 
@@ -55,7 +61,7 @@ Item {
   readonly property bool updateMode: root.category === "Updates" && root.filterText === ""
                                      && root.updatesCount > 0 && root.basketCount === 0
 
-  readonly property var categoryNames: ["Featured"].concat(Catalog.categories).concat(["Updates", "Installed"])
+  readonly property var categoryNames: ["Featured", "Bundles"].concat(Catalog.categories).concat(["Updates", "Installed"])
 
   // Theme tokens (shared with the Omarchy menu).
   property color background: Commons.Color.menu.background
@@ -113,6 +119,8 @@ Item {
   function rebuild() {
     var rows = Model.build({
       catalog: Catalog.apps,
+      bundles: Catalog.bundles,
+      desktops: root.desktops,
       category: root.category,
       filter: root.filterText,
       repo: root.repo,
@@ -266,10 +274,33 @@ Item {
 
   // ---------------------------------------------------------------- basket
 
+  // Members of a bundle that are not installed yet.
+  function pendingMembers(item) {
+    var out = []
+    var members = (item && item.members) || []
+    for (var i = 0; i < members.length; i++) if (!members[i].installed) out.push(members[i])
+    return out
+  }
+
+  function isMarked(item) {
+    if (!item) return false
+    if (!item.bundle) return !!root.basket[item.p]
+    var pending = root.pendingMembers(item)
+    for (var i = 0; i < pending.length; i++) if (!root.basket[pending[i].p]) return false
+    return pending.length > 0
+  }
+
   function toggleMark(item) {
     if (!item || item.installed) return
     var next = Object.assign({}, root.basket)
-    if (next[item.p]) delete next[item.p]
+    if (item.bundle) {
+      var pending = root.pendingMembers(item)
+      var all = root.isMarked(item)
+      for (var i = 0; i < pending.length; i++) {
+        if (all) delete next[pending[i].p]
+        else next[pending[i].p] = pending[i].r === "aur" ? "aur" : "repo"
+      }
+    } else if (next[item.p]) delete next[item.p]
     else next[item.p] = item.r === "aur" ? "aur" : "repo"
     root.basket = next
     root.basketCount = Object.keys(next).length
@@ -297,7 +328,23 @@ Item {
   }
 
   function installOne(item) {
-    if (item && !item.installed) root.installItems([item])
+    if (!item || item.installed) return
+    if (item.bundle) root.installItems(root.pendingMembers(item))
+    else root.installItems([item])
+  }
+
+  function resolveIcon(src) {
+    if (src.indexOf("image://icon/") !== 0) return src
+    var path = Quickshell.iconPath(src.slice(13), true)
+    return path ? String(path) : ""
+  }
+
+  // Starts an installed app through its desktop entry. The id comes from a
+  // .desktop file name and is checked again here before it reaches a command.
+  function launchItem(item) {
+    if (!item || !item.launch || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(item.launch)) return
+    root.dismiss()
+    Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", item.launch])
   }
 
   function installBasketOrCurrent() {
@@ -396,6 +443,23 @@ Item {
     }
   }
 
+  // One pass over the .desktop files of all installed packages gives icons and
+  // launch ids. Re-run only when the number of installed packages changes.
+  Process {
+    id: desktopProc
+    command: [root.here + "/desktop-entries"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var parsed = Model.parseDesktops(text)
+        // Drop theme icons the system cannot find, so they do not show as a
+        // placeholder; the letter tile is used instead.
+        for (var pkg in parsed) parsed[pkg].icon = root.resolveIcon(parsed[pkg].icon)
+        root.desktops = parsed
+        root.rebuild()
+      }
+    }
+  }
+
   Process {
     id: queryProc
     command: ["bash", "-c", "pacman -Qq; echo ---; pacman -Qqe"]
@@ -404,6 +468,11 @@ Item {
         var parsed = Model.parseQuery(text)
         root.installed = parsed.all
         root.explicit = parsed.explicit
+        var total = Object.keys(parsed.all).length
+        if (total !== root.desktopsFor && !desktopProc.running) {
+          root.desktopsFor = total
+          desktopProc.running = true
+        }
         var next = {}
         var count = 0
         for (var p in root.basket) if (!parsed.all[p]) { next[p] = root.basket[p]; count++ }
@@ -478,12 +547,15 @@ Item {
             if (key === Qt.Key_Return || key === Qt.Key_Enter) root.detailAction()
             else if (key === Qt.Key_Delete) root.removeItem(root.detailItem)
             else if (ctrl && key === Qt.Key_O) root.openHomepage()
+            else if (ctrl && key === Qt.Key_L) root.launchItem(root.detailItem)
           } else if (ctrl && key === Qt.Key_A) {
             root.toggleAur()
           } else if (ctrl && key === Qt.Key_S) {
             root.cycleSort()
           } else if (ctrl && key === Qt.Key_R) {
             root.refreshUpdates(true)
+          } else if (ctrl && key === Qt.Key_L) {
+            root.launchItem(root.currentItem())
           } else if (ctrl && key === Qt.Key_I) {
             root.openDetails(root.currentItem())
           } else if (key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
@@ -689,8 +761,10 @@ Item {
               required property var modelData
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
-              readonly property bool marked: !!root.basket[modelData.p]
+              readonly property bool isBundle: !!modelData.bundle
+              readonly property bool marked: root.isMarked(modelData)
               readonly property bool showInstalled: !!modelData.installed && !modelData.upd
+              readonly property bool canLaunch: !!modelData.launch && showInstalled
               readonly property var warns: Model.warnings(modelData)
 
               width: grid.cellWidth
@@ -721,7 +795,7 @@ Item {
                     id: iconImage
                     anchors.fill: parent
                     anchors.margins: Style.space(6)
-                    source: cell.modelData.installed ? "image://icon/" + cell.modelData.p : ""
+                    source: cell.modelData.icon || ""
                     sourceSize: Qt.size(64, 64)
                     fillMode: Image.PreserveAspectFit
                     visible: status === Image.Ready
@@ -779,20 +853,24 @@ Item {
 
                 Text {
                   anchors.left: nameText.left
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.spacing.lg + 2
-                  anchors.top: actionPill.bottom
+                  anchors.right: cell.canLaunch ? launchPill.left : parent.right
+                  anchors.rightMargin: cell.canLaunch ? Style.spacing.md : Style.spacing.lg + 2
+                  anchors.verticalCenter: cell.canLaunch ? launchPill.verticalCenter : undefined
+                  anchors.top: cell.canLaunch ? undefined : actionPill.bottom
                   anchors.topMargin: Style.spacing.sm
                   textFormat: Text.PlainText
                   text: {
+                    if (cell.modelData.meta) return cell.modelData.meta
                     var bits = []
                     if (cell.warns.length) bits.push("⚠ " + cell.warns.join(", "))
                     if (cell.modelData.upd) {
                       bits.push(cell.modelData.upd.replace(/(^|\s)\d+:/g, "$1"))
                       return bits.join("  ·  ")
                     }
-                    bits.push(cell.modelData.r)
+                    // Launchable cards share this line with the Launch pill, so keep it short.
+                    if (!cell.canLaunch) bits.push(cell.modelData.r)
                     if (cell.modelData.v) bits.push(cell.modelData.v.replace(/^\d+:/, ""))
+                    if (cell.canLaunch) return bits.join("  ·  ")
                     var size = Model.formatSize(cell.modelData.s)
                     if (size) bits.push(size)
                     if (cell.modelData.votes) bits.push("★ " + cell.modelData.votes)
@@ -848,12 +926,12 @@ Item {
                   radius: height / 2
                   color: {
                     if (cell.showInstalled)
-                      return pillMouse.containsMouse ? Util.alpha(Commons.Color.urgent, 0.25) : "transparent"
+                      return pillMouse.containsMouse && !cell.isBundle ? Util.alpha(Commons.Color.urgent, 0.25) : "transparent"
                     return pillMouse.containsMouse ? root.accent : Util.alpha(root.accent, cell.marked ? 0.45 : 0.18)
                   }
                   border.width: 1
                   border.color: cell.showInstalled
-                    ? Util.alpha(pillMouse.containsMouse ? Commons.Color.urgent : root.foreground, 0.5)
+                    ? Util.alpha(pillMouse.containsMouse && !cell.isBundle ? Commons.Color.urgent : root.foreground, 0.5)
                     : Util.alpha(root.accent, 0.8)
                   Behavior on color { ColorAnimation { duration: Style.duration(120) } }
 
@@ -862,12 +940,12 @@ Item {
                     anchors.centerIn: parent
                     textFormat: Text.PlainText
                     text: cell.showInstalled
-                      ? (pillMouse.containsMouse ? "Remove" : "Installed")
-                      : (cell.modelData.upd ? "Update" : (cell.marked ? "Queued" : "Install"))
+                      ? (pillMouse.containsMouse && !cell.isBundle ? "Remove" : "Installed")
+                      : (cell.modelData.upd ? "Update" : (cell.marked ? "Queued" : (cell.isBundle ? "Install all" : "Install")))
                     color: cell.showInstalled
-                      ? (pillMouse.containsMouse ? Commons.Color.urgent : root.foreground)
+                      ? (pillMouse.containsMouse && !cell.isBundle ? Commons.Color.urgent : root.foreground)
                       : (pillMouse.containsMouse ? root.background : root.accent)
-                    opacity: cell.showInstalled && !pillMouse.containsMouse ? 0.65 : 1
+                    opacity: cell.showInstalled && !(pillMouse.containsMouse && !cell.isBundle) ? 0.65 : 1
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.bold: true
@@ -883,6 +961,42 @@ Item {
                       else if (cell.modelData.installed) root.removeItem(cell.modelData)
                       else root.installOne(cell.modelData)
                     }
+                  }
+                }
+
+                // Launch pill for installed apps that have a desktop entry
+                Rectangle {
+                  id: launchPill
+                  visible: cell.canLaunch
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.lg + 2
+                  anchors.top: actionPill.bottom
+                  anchors.topMargin: Style.spacing.sm
+                  width: launchText.implicitWidth + Style.spacing.lg * 2
+                  height: Style.font.bodySmall + Style.spacing.md * 2
+                  radius: height / 2
+                  color: launchMouse.containsMouse ? root.accent : Util.alpha(root.accent, 0.18)
+                  border.width: 1
+                  border.color: Util.alpha(root.accent, 0.8)
+                  Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+
+                  Text {
+                    id: launchText
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: "Launch"
+                    color: launchMouse.containsMouse ? root.background : root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
+
+                  MouseArea {
+                    id: launchMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.launchItem(cell.modelData)
                   }
                 }
               }
@@ -934,7 +1048,7 @@ Item {
             textFormat: Text.PlainText
             text: root.updateMode
               ? "↵ update all   ^I details   ^R recheck   ^S sort   ⇥ category   esc close"
-              : "↵ install   Ins queue   Del remove   ^I details   ^S sort   ^A AUR   ⇥ category   esc close"
+              : "↵ install   Ins queue   Del remove   ^L launch   ^I details   ^S sort   ^A AUR   ⇥ category   esc close"
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
@@ -1030,8 +1144,19 @@ Item {
               border.width: 1
               border.color: Util.alpha(root.accent, 0.6)
 
+              Image {
+                id: detailImage
+                anchors.fill: parent
+                anchors.margins: Style.space(8)
+                source: root.detailItem && root.detailItem.icon ? root.detailItem.icon : ""
+                sourceSize: Qt.size(96, 96)
+                fillMode: Image.PreserveAspectFit
+                visible: status === Image.Ready
+              }
+
               Text {
                 anchors.centerIn: parent
+                visible: detailImage.status !== Image.Ready
                 textFormat: Text.PlainText
                 text: root.detailItem ? String(root.detailItem.label || root.detailItem.n).charAt(0).toUpperCase() : ""
                 color: root.accent
@@ -1166,6 +1291,7 @@ Item {
             textFormat: Text.PlainText
             text: (root.detailItem && root.detailItem.upd ? "↵ update all   " : (root.detailItem && !root.detailItem.installed ? "↵ install   " : ""))
                   + (root.detailItem && root.detailItem.installed ? "Del remove   " : "")
+                  + (root.detailItem && root.detailItem.launch ? "^L launch   " : "")
                   + (root.detailInfo && root.detailInfo.url ? "^O homepage   " : "") + "esc back"
             color: root.foreground
             opacity: 0.5
@@ -1227,7 +1353,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
-            text: "Version " + ((root.manifest && root.manifest.version) || "1.1.0")
+            text: "Version " + ((root.manifest && root.manifest.version) || "1.2.0")
             color: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
