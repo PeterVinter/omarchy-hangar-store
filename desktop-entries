@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Prints one line per launchable app of an installed package:
+#   package <TAB> desktop-id <TAB> Icon value <TAB> terminal (1 or 0)
+# Reads only the .desktop files that pacman lists for installed packages.
+pacman -Ql | awk '
+  $2 ~ /^\/usr\/share\/applications\/[^\/]+\.desktop$/ {
+    pkg = $1; f = $2; icon = ""; hide = 0; term = 0; type = ""; inmain = 0
+    while ((getline line < f) > 0) {
+      if (line ~ /^\[/) inmain = (line == "[Desktop Entry]")
+      else if (inmain) {
+        if (line ~ /^Icon=/ && icon == "") icon = substr(line, 6)
+        else if (line ~ /^NoDisplay=true/) hide = 1
+        else if (line ~ /^Terminal=true/) term = 1
+        else if (line ~ /^Type=/) type = substr(line, 6)
+      }
+    }
+    close(f)
+    if (!hide && type == "Application") {
+      id = f; sub(/.*\//, "", id); sub(/\.desktop$/, "", id)
+      print pkg "\t" id "\t" icon "\t" term
+    }
+  }'

@@ -169,6 +169,71 @@ function parseUpdates(text) {
   return out
 }
 
+// ---- Desktop entries: icons and launching ------------------------------------
+
+// Turns an `Icon=` value into an image source, or "" when it looks wrong.
+// Theme names go through the icon provider, absolute paths must be image files
+// under /usr or /opt.
+function iconSource(icon) {
+  icon = String(icon || "")
+  if (/^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(icon)) return "image://icon/" + icon
+  if (/^\/(usr|opt)\/[A-Za-z0-9._+\/-]{1,250}\.(png|svg|xpm)$/.test(icon) && icon.indexOf("..") < 0) return "file://" + icon
+  return ""
+}
+
+// Parses `pkg \t desktop-id \t Icon \t terminal(0|1)` lines into
+// { pkg: { id, icon, launch } }. `launch` is empty for terminal apps, which
+// gtk-launch cannot start properly. A package with several entries keeps the one
+// named like the package, otherwise the first.
+function parseDesktops(text) {
+  var out = {}
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var f = lines[i].split("\t")
+    if (f.length < 4 || !validName(f[0]) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(f[1])) continue
+    if (out[f[0]] && !(f[1] === f[0] && out[f[0]].id !== f[0])) continue
+    out[f[0]] = { id: f[1], icon: iconSource(f[2]), launch: f[3] === "1" ? "" : f[1] }
+  }
+  return out
+}
+
+// ---- Bundles ----------------------------------------------------------------
+
+// Resolves a bundle definition against this machine. Members that are not in the
+// repositories (and not AUR with AUR search on) are counted but left out.
+function resolveBundle(b, opts) {
+  var byPkg = {}
+  for (var i = 0; i < opts.catalog.length; i++) byPkg[opts.catalog[i].p] = opts.catalog[i]
+  var members = []
+  var unavailable = 0
+  for (var j = 0; j < b.apps.length; j++) {
+    var p = b.apps[j]
+    var c = byPkg[p]
+    var ri = opts.repoIndex[p]
+    if (!validName(p) || (ri === undefined && !(c && c.a && opts.aurEnabled))) { unavailable++; continue }
+    var repo = ri !== undefined ? opts.repo[ri] : null
+    members.push({ p: p, label: c ? c.n : p, r: repo ? repo.r : "aur", s: repo ? repo.s : 0, installed: !!opts.installed[p] })
+  }
+  return { members: members, unavailable: unavailable }
+}
+
+function bundleRow(b, opts) {
+  var res = resolveBundle(b, opts)
+  if (!res.members.length) return null
+  var todo = 0
+  var size = 0
+  for (var i = 0; i < res.members.length; i++) {
+    if (!res.members[i].installed) { todo++; size += res.members[i].s }
+  }
+  var bits = [todo ? todo + " to install" : "all " + res.members.length + " installed"]
+  if (size) bits.push(formatSize(size))
+  return {
+    n: b.n, label: b.n, p: "bundle:" + b.id, c: "", r: "bundle", v: "", s: size,
+    d: res.members.map(function(m) { return m.label }).join(", "),
+    bundle: true, members: res.members, pending: todo, meta: bits.join("  ·  ")
+  }
+}
+
 // ---- Sorting ----------------------------------------------------------------
 
 var sortModes = ["Default", "Name", "Size", "Votes"]
@@ -191,8 +256,8 @@ function score(item, q) {
 }
 
 // Builds the visible rows.
-// opts: { catalog, categories, category, filter, repo, repoIndex, installed,
-//         explicit, updates, aurEnabled, aurResults, sort, limit }
+// opts: { catalog, bundles, desktops, categories, category, filter, repo, repoIndex,
+//         installed, explicit, updates, aurEnabled, aurResults, sort, limit }
 function build(opts) {
   var out = []
   var seen = {}
@@ -202,6 +267,8 @@ function build(opts) {
     if (seen[item.p]) return
     seen[item.p] = true
     item.installed = !!opts.installed[item.p]
+    var desk = item.installed && opts.desktops ? opts.desktops[item.p] : null
+    if (desk) { item.icon = desk.icon; item.launch = desk.launch }
     out.push(item)
   }
 
@@ -235,6 +302,15 @@ function build(opts) {
         push({ n: a.n, label: a.n, p: a.p, c: "", d: a.d, r: "aur", v: a.v, s: 0, votes: a.votes,
                updated: a.updated, ood: a.ood, orphan: a.orphan })
       }
+    }
+    return sortRows(out, opts.sort)
+  }
+
+  if (opts.category === "Bundles") {
+    var bundles = opts.bundles || []
+    for (var bi = 0; bi < bundles.length; bi++) {
+      var brow = bundleRow(bundles[bi], opts)
+      if (brow) { push(brow); brow.installed = brow.pending === 0 }
     }
     return sortRows(out, opts.sort)
   }
