@@ -26,6 +26,8 @@ package in your repositories, and install or remove with one key.
 | ![AUR results sorted by votes with warnings](docs/screenshots/06-aur-sorted-by-votes.png) | ![AUR package details with warning](docs/screenshots/07-details-aur-trust.png) |
 | **Sort** by name, size or votes (`Ctrl+S`). | **Search** with the AUR switched on (`Ctrl+A`). |
 | ![Sorted by size](docs/screenshots/02-sort-by-size.png) | ![Search with AUR on](docs/screenshots/05-aur-trust-warnings.png) |
+| **Bundles.** Starter packs: `Insert` queues a whole pack, `Enter` installs it. | **Real icons and Launch.** Installed apps show their icon and a Launch button (`Ctrl+L`). |
+| ![Bundles tab with a queued pack](docs/screenshots/09-bundles.png) | ![Featured with icons and Launch buttons](docs/screenshots/08-launch-and-icons.png) |
 
 ## Install
 
@@ -52,6 +54,8 @@ other files or settings, and apps you installed with it stay installed.
 
 ## Features
 
+- Bundles: six starter packs (Dev setup, Creative, Media center, Office, Privacy, Gaming) that fill the install queue in one key. Apps missing for your architecture are skipped.
+- Real app icons and a Launch button for installed apps, read from their `.desktop` files.
 - Curated apps in nine categories: Browsers, Development, Media, Graphics, Office, Communication, Utilities, Games and AI.
 - Live search across every package in your configured repositories.
 - Optional AUR search (toggle with `Ctrl+A`).
@@ -75,6 +79,7 @@ other files or settings, and apps you installed with it stay installed.
 | `Tab` / `Shift+Tab` | Next / previous category |
 | `Ctrl+A` | Toggle AUR search |
 | `Ctrl+I` / right-click | Show package details |
+| `Ctrl+L` | Launch the selected installed app (also in the detail view) |
 | `Ctrl+S` | Cycle sort: Default, Name, Size, Votes |
 | `Ctrl+R` | Recheck for updates |
 | `Ctrl+O` | In the detail view, open the homepage |
@@ -91,6 +96,11 @@ password there:
 - `omarchy-pkg-aur-add` for AUR packages
 - `omarchy-pkg-drop` for removal
 - `omarchy-update` for the Updates tab
+
+Launching an installed app runs `uwsm-app -- gtk-launch <desktop id>`. Terminal apps
+(for example btop) get an icon but no Launch button. Icons for apps you have not
+installed yet fall back to the letter tile, because the package file lists are not
+available without root.
 
 Package names are validated before they reach a command line. The plugin reads your
 package databases with `expac` and `pacman -Q`, and checks updates with `checkupdates`

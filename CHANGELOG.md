@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+- **Bundles tab.** Six starter packs: Dev setup, Creative, Media center, Office,
+  Privacy and Gaming. `Insert` or a click queues every missing app in a pack,
+  `Enter` or **Install all** installs them. Packages that your repositories do not
+  have are left out. Pack contents live in `Catalog.js`.
+- **Real icons.** Installed apps show the icon from their `.desktop` file. Icons the
+  theme cannot find fall back to the letter tile instead of a placeholder.
+- **Launch.** Installed apps with a desktop entry get a **Launch** button and
+  `Ctrl+L` (also in the detail view). Terminal apps are not launchable.
+- `test/model.test.js` covers the desktop-entry parser and the bundle logic.
+
+### Changed
+- Cards for launchable apps show a shorter meta line to make room for the button.
+
 ## 1.1.0
 
 ### Added
