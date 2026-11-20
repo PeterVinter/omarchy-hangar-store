@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+Listing and documentation only; the plugin's behavior is unchanged.
+
+- **A short description.** The manifest description, shown on the marketplace card, is one sentence: "A themed app store for Omarchy: browse, search and install with one key."
+- **A new preview image.** `preview.png` is now a 1920x1080 poster with three real views: Featured, an AUR search with trust warnings, and the Bundles tab.
+- **README first screen.** A one-line pitch, the new image and a short "Why you will want it" list before the screenshot gallery.
+
 ## 1.2.0
 
 ### Added
