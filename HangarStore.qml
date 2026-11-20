@@ -1353,7 +1353,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
-            text: "Version " + ((root.manifest && root.manifest.version) || "1.2.0")
+            text: "Version " + ((root.manifest && root.manifest.version) || "1.2.1")
             color: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.body

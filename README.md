@@ -2,19 +2,25 @@
 
 # Hangar Store
 
-**A themed app store for Omarchy.**
-
-An Omarchy shell plugin. Browse curated apps by category, search every
-package in your repositories, and install or remove with one key.
+**A themed app store for Omarchy: browse, search and install with one key.**
 
 <img src="https://img.shields.io/badge/Omarchy-4.x-a855f7?style=flat-square" alt="Omarchy 4.x">
 <img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT">
 
 <br><br>
 
-<img src="preview.png" alt="Hangar Store showing the Featured category with app cards and Install buttons" width="820">
+<img src="preview.png" alt="Hangar Store: the Featured category with app cards, and two more views behind it: an AUR search with trust warnings and the Bundles tab" width="900">
 
 </div>
+
+## Why you will want it
+
+- **One key to install.** `Enter` installs the queue or the selected app, `Delete` removes it. Mark several apps with `Insert` and install them in one go.
+- **Curated, and everything else too.** Nine categories of hand-picked apps, plus live search across every package in your repositories.
+- **The AUR, with trust signals.** Switch it on with `Ctrl+A`; stale, orphaned and out-of-date packages carry a plain-language warning, with votes and age.
+- **Bundles.** Six starter packs (Dev setup, Creative, Media center, Office, Privacy, Gaming) fill the install queue in one key.
+- **You see what happens.** Hangar Store installs nothing itself: it opens a floating terminal and runs Omarchy's own helpers, so you can read every step and type your password there.
+- **It looks like Omarchy.** Colors, font and corners follow your theme.
 
 ## Screenshots
 

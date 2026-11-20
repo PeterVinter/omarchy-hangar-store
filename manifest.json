@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "peter.hangar-store",
   "name": "Hangar Store",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "Peter Vinter",
   "license": "MIT",
-  "description": "Hangar Store: a themed app store for Omarchy. Browse curated apps by category, search every package in your repositories, optionally search the AUR with trust warnings, see pending updates, inspect package details, and install or remove with one key. Open with: omarchy-shell shell toggle peter.hangar-store",
+  "description": "A themed app store for Omarchy: browse, search and install with one key.",
   "kinds": ["overlay"],
   "entryPoints": { "overlay": "HangarStore.qml" }
 }
